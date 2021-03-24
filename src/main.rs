@@ -61,8 +61,8 @@ impl NetworkBehaviourEventProcess<MdnsEvent> for RecipeBehaviour {
 async fn main() {
     pretty_env_logger::init();
     let auth_keys = Keypair::<X25519Spec>::new()
-    .into_authentic(&KEYS)
-    .expect("can create auth keys");
+        .into_authentic(&KEYS)
+        .expect("can create auth keys");
 
     let transp = TokioTcpConfig::new()
         .upgrade(upgrade::Version::V1)
