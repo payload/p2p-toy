@@ -1,13 +1,25 @@
 #![allow(unused_imports)]
 use kad::{Kademlia, KademliaEvent};
-use libp2p::{NetworkBehaviour, PeerId, Transport, core::upgrade, floodsub::{Floodsub, FloodsubEvent, Topic}, futures::{future, task}, identity, kad, kad::store::MemoryStore, mdns::{MdnsEvent, TokioMdns}, mplex, noise::{Keypair, NoiseConfig, X25519Spec}, swarm::{NetworkBehaviour, NetworkBehaviourEventProcess, Swarm, SwarmBuilder}, tcp::TokioTcpConfig};
+use libp2p::futures::StreamExt;
+use libp2p::{
+    core::upgrade,
+    floodsub::{Floodsub, FloodsubEvent, Topic},
+    futures::{future, task},
+    identity, kad,
+    kad::store::MemoryStore,
+    mdns::{MdnsEvent, TokioMdns},
+    mplex,
+    noise::{Keypair, NoiseConfig, X25519Spec},
+    swarm::{ExpandedSwarm, NetworkBehaviour, NetworkBehaviourEventProcess, Swarm, SwarmBuilder},
+    tcp::TokioTcpConfig,
+    NetworkBehaviour, PeerId, Transport,
+};
 use log::{error, info};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use task::Poll;
 use std::{collections::HashSet, str::FromStr, task::Context};
+use task::Poll;
 use tokio::{fs, io::AsyncBufReadExt, runtime::Runtime, sync::mpsc};
-use libp2p::futures::StreamExt;
 
 static KEYS: Lazy<identity::Keypair> = Lazy::new(|| identity::Keypair::generate_ed25519());
 static PEER_ID: Lazy<PeerId> = Lazy::new(|| PeerId::from(KEYS.public()));
@@ -95,7 +107,7 @@ async fn main() {
     let store = MemoryStore::new(PEER_ID.clone());
     let mut kademlia = kad::Kademlia::new(PEER_ID.clone(), store);
 
-    if let Some((peerid, addr)) = kad_peerid.zip(kad_addr) {
+    if let Some((peerid, addr)) = kad_peerid.clone().zip(kad_addr) {
         let peerid = PeerId::from_str(&peerid).expect("kademlia peerid");
         let addr = addr.parse().expect("kademlia address");
         let update = kademlia.add_address(&peerid, addr);
@@ -115,7 +127,8 @@ async fn main() {
 
     let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
 
-    let mut swarm = SwarmBuilder::new(transp, behaviour, PEER_ID.clone())
+    let mut swarm  /* br */
+    = SwarmBuilder::new(transp, behaviour, PEER_ID.clone())
         .executor(Box::new(|fut| {
             tokio::spawn(fut);
         }))
@@ -135,26 +148,25 @@ async fn main() {
     }
     */
 
-    if let Some(peerid) = kad_peerid {
+    if let Some(peerid) = kad_peerid.as_ref() {
         let to_search = PeerId::from_str(&peerid).expect("yes yes");
-        swarm.behaviour_mut().get_closest_peers(to_search);
+        let beh: &mut RecipeBehaviour = &mut *swarm;
+        let query = beh.kademlia.get_closest_peers(to_search);
     }
 
     let mut listening = false;
-    let mut listening_fut = future::poll_fn(move |cx: &mut Context<'_>| {
-        loop {
-            match swarm.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => println!("{:?}", event),
-                Poll::Ready(None) => return Poll::Ready(()),
-                Poll::Pending => {
-                    if !listening {
-                        for addr in Swarm::listeners(&swarm) {
-                            println!("Listening on {}", addr);
-                            listening = true;
-                        }
+    let mut listening_fut = future::poll_fn(move |cx: &mut Context<'_>| loop {
+        match swarm.poll_next_unpin(cx) {
+            Poll::Ready(Some(event)) => println!("{:?}", event),
+            Poll::Ready(None) => return Poll::Ready(()),
+            Poll::Pending => {
+                if !listening {
+                    for addr in Swarm::listeners(&swarm) {
+                        println!("Listening on {}", addr);
+                        listening = true;
                     }
-                    return Poll::Pending
                 }
+                return Poll::Pending;
             }
         }
     });
